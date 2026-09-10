@@ -116,6 +116,7 @@ import { IPreferencesService } from '../../../services/preferences/common/prefer
 
 // Editor
 import { ITextModel } from '../../../../editor/common/model.js';
+import { registerFixtureLanguages, registerFixtureSyntaxHighlighting } from './fixtureSyntaxHighlighting.js';
 
 import './fixtures.css';
 
@@ -380,7 +381,7 @@ function ensureFileIconThemeLoaded(theme: FileIconThemeData): Promise<string | u
 			if (theme.isLoaded) {
 				return theme.styleSheetContent;
 			}
-			const languageService = new LanguageService();
+			const languageService = disposables.add(new LanguageService());
 			try {
 				return await theme.ensureLoaded(new FileIconThemeLoader(fixtureExtensionResourceLoaderService, languageService));
 			} finally {
@@ -630,7 +631,9 @@ export function createEditorServices(disposables: DisposableStore, options?: Cre
 	define(INotificationService, TestNotificationService);
 	define(IDialogService, TestDialogService);
 	define(IUndoRedoService, UndoRedoService);
-	define(ILanguageService, LanguageService);
+	const languageService = disposables.add(new LanguageService());
+	registerFixtureLanguages(disposables, languageService);
+	defineInstance(ILanguageService, languageService);
 	define(ILanguageConfigurationService, TestLanguageConfigurationService);
 	define(IConfigurationService, TestConfigurationService);
 	define(ITextResourcePropertiesService, TestTextResourcePropertiesService);
@@ -920,7 +923,9 @@ export function createTextModel(
 	const modelService = instantiationService.get(IModelService);
 	const languageService = instantiationService.get(ILanguageService);
 	const languageSelection = languageId ? languageService.createById(languageId) : null;
-	return modelService.createModel(text, languageSelection, uri);
+	const model = modelService.createModel(text, languageSelection, uri);
+	model.tokenization.forceTokenization(model.getLineCount());
+	return model;
 }
 
 
@@ -1126,7 +1131,11 @@ export function defineComponentFixture(options: ComponentFixtureOptions): Themed
 			});
 
 			async function actualRender() {
-				const fileIconTheme = await setupTheme(container, theme, options.fileIconTheme, fixtureHost);
+				const [fileIconTheme] = await Promise.all([
+					setupTheme(container, theme, options.fileIconTheme, fixtureHost),
+					ensureThemeLoaded(darkTheme),
+				]);
+				await registerFixtureSyntaxHighlighting(disposableStore, fixtureHost, darkTheme, theme);
 
 				const stylesheetOrderOverride = disposableStore.add(new MutableDisposable<IDisposable>());
 				const updateStylesheetOrder = (input: unknown) => {
